@@ -20,7 +20,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 import torch
-from accelerate import PartialState
+from accelerate import Accelerator, PartialState
+from accelerate.state import AcceleratorState
+from accelerate.utils import is_deepspeed_available
 from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
@@ -31,6 +33,7 @@ from torch.utils.data import IterableDataset
 from transformers import (
     BitsAndBytesConfig,
     DataCollatorForLanguageModeling,
+    PreTrainedModel,
     PreTrainedTokenizerBase,
 )
 from transformers.trainer import TrainerCallback
@@ -42,6 +45,10 @@ from ..trainer.model_config import ModelConfig
 
 if is_peft_available():
     from peft import LoraConfig, PeftConfig
+
+
+if is_deepspeed_available():
+    import deepspeed
 
 
 class AdaptiveKLController:
@@ -60,6 +67,44 @@ class AdaptiveKLController:
         proportional_error = np.clip(current / target - 1, -0.2, 0.2)
         mult = 1 + proportional_error * n_steps / self.horizon
         self.value *= mult
+
+
+class SyncRefModelCallback(TrainerCallback):
+    def __init__(
+        self,
+        ref_model: Union[PreTrainedModel, torch.nn.Module],
+        accelerator: Optional[Accelerator],
+        ref_model_mixup_alpha: float,
+        ref_model_sync_steps: int,
+    ):
+        self.ref_model_mixup_alpha = ref_model_mixup_alpha
+        self.ref_model_sync_steps = ref_model_sync_steps
+        self.accelerator = accelerator
+        self.ref_model = ref_model
+
+    @staticmethod
+    def _sync_target_model(model, target_model, alpha):
+        for target_param, copy_param in zip(target_model.parameters(), model.parameters()):
+            target_param.data.copy_((alpha * copy_param.data) + (1.0 - alpha) * target_param.data)
+
+    @classmethod
+    def sync_target_model(cls, model, target_model, alpha):
+        if AcceleratorState().deepspeed_plugin.zero_stage == 3:
+            with deepspeed.zero.GatheredParameters(list(model.parameters()), modifier_rank=0):
+                if deepspeed.comm.get_rank() == 0:
+                    cls._sync_target_model(model, target_model, alpha)
+        else:
+            cls._sync_target_model(model, target_model, alpha)
+
+    def on_step_end(self, args, state, control, **kwargs):
+        model: PreTrainedModel = kwargs["model"]
+
+        if self.ref_model is not None and self.global_step % self.ref_model_sync_steps == 0:
+            if self.accelerator:
+                unwrapped_model = self.accelerator.unwrap_model(model)
+                self.sync_target_model(unwrapped_model, self.ref_model, self.ref_model_mixup_alpha)
+            else:
+                self.sync_target_model(model, self.ref_model, self.ref_model_mixup_alpha)
 
 
 class FixedKLController:
