@@ -72,6 +72,6 @@ class RLOOConfig(TrainingArguments, OnpolicyRuntimeConfig):
     kl_coef: float = 0.05
     """the KL coefficient"""
 
-    # rloo config
+    # rloo config: 4 the best in paper, 2 is good also
     rloo_k: int = 2
     """REINFORCE Leave-One-Out (RLOO) number of online samples per prompt"""
