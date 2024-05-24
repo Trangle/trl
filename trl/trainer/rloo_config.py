@@ -13,7 +13,7 @@ INVALID_LOGPROB = 1.0
 
 
 @dataclass
-class RLOOConfig(TrainingArguments, OnpolicyRuntimeConfig):
+class RLOOConfig(OnpolicyRuntimeConfig, TrainingArguments):
     # common config
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """the name of this experiment"""
@@ -37,16 +37,16 @@ class RLOOConfig(TrainingArguments, OnpolicyRuntimeConfig):
     """the name of the pretrained model to use"""
     response_length: int = 53
     """the length of the response"""
-    truncate_token: Optional[Literal["eos"]] = None
-    """the truncate token"""
-    truncate_token_id: Optional[int] = None
-    """the truncation token id"""
+    stop_token: Optional[Literal["eos"]] = None
+    """the stop token"""
+    stop_token_id: Optional[int] = None
+    """the stop token id"""
     temperature: float = 0.7
     """the sampling temperature"""
     penalty_reward_value: int = -1
-    """the reward value for responses that do not contain `truncate_token_id`"""
+    """the reward value for responses that do not contain `stop_token_id`"""
     non_eos_penalty: bool = False
-    """whether to penalize responses that do not contain `truncate_token_id`"""
+    """whether to penalize responses that do not contain `stop_token_id`"""
     reward_model_path: str = "EleutherAI/pythia-160m"
     """the path to the reward model"""
     sft_model_path: str = "EleutherAI/pythia-160m"
